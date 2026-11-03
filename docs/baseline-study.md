@@ -29,6 +29,25 @@ fairness evaluation, or an operational signal.
 - **Contract first:** `validate()` from the v0.1.0 contract runs before any split
   or fit. Schema mismatch and missing columns fail closed.
 
+## Subject-stratified K-fold
+
+`--k-folds` replaces the two-way split with a seeded subject-stratified K-fold.
+Each `subject_key` sits in exactly one validation fold, and every train/validation
+pair is checked for subject and time leakage. The fold count must be an integer
+of at least 2. An empty cohort, or one with fewer subjects (or fewer subjects in
+a class) than the fold count, fails closed. Omit `--k-folds` to keep the default
+two-way split. `--train-fraction` applies only to that two-way split.
+
+Folds are for aggregate research evaluation and are never for clinical
+decision-making. Reported test metrics are pooled out-of-fold predictions: each
+subject is scored once. They are not a diagnosis, a treatment recommendation, or
+an operational signal.
+
+```bash
+datalife-baseline --seed 20260101 --subjects 80 --split-seed 7 \
+    --k-folds 5 --out reports/generated
+```
+
 ## Naive comparator
 
 A constant predictor equal to the training positive rate (hard label = majority

@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .split import KFOLD_RESEARCH_ONLY
+
 
 def _fmt(value: object) -> str:
     if value is None:
@@ -60,6 +62,39 @@ def to_markdown(payload: dict[str, Any]) -> str:
             missing_lines.append(f"| `{table}.{name}` | {fraction:.3f} |")
 
     limitations = "\n".join(f"- {item}" for item in payload["limitations"])
+    kfold = split.get("mode") == "subject_stratified_kfold"
+    if kfold:
+        research_note = f"\n> {KFOLD_RESEARCH_ONLY}\n"
+        n_splits_row = f"| n_splits | {lineage['n_splits']} |\n"
+        cohort_split = (
+            f"| folds | {split['n_splits']} |\n| out-of-fold examples | {split['n_examples']} |"
+        )
+        fold_lines = [
+            "| fold | train examples (subjects) | validation examples (subjects) "
+            "| validation positive rate |",
+            "|---|---|---|---|",
+        ]
+        for fold in split["folds"]:
+            fold_lines.append(
+                f"| {fold['fold']} | {fold['n_train']} ({fold['train_subjects']}) | "
+                f"{fold['n_validation']} ({fold['validation_subjects']}) | "
+                f"{fold['validation_positive_rate']:.3f} |"
+            )
+        fold_section = (
+            "\n## Folds\n\n"
+            "Train metrics below are means across folds. Test metrics are pooled "
+            "out-of-fold predictions, so each subject is scored once.\n\n"
+            + "\n".join(fold_lines)
+            + "\n"
+        )
+    else:
+        research_note = "\n"
+        n_splits_row = ""
+        cohort_split = (
+            f"| train examples (subjects) | {split['n_train']} ({split['train_subjects']}) |\n"
+            f"| test examples (subjects) | {split['n_test']} ({split['test_subjects']}) |"
+        )
+        fold_section = ""
 
     return f"""# Baseline study report
 
@@ -69,7 +104,7 @@ def to_markdown(payload: dict[str, Any]) -> str:
 {lineage["study_question"]}
 
 > {lineage["non_use"]}
-
+{research_note}
 ## Lineage
 
 | key | value |
@@ -82,7 +117,7 @@ def to_markdown(payload: dict[str, Any]) -> str:
 | n_subjects | {lineage["n_subjects"]} |
 | split_seed | {lineage["split_seed"]} |
 | train_fraction | {lineage["train_fraction"]} |
-| SBP threshold | {lineage["elevated_sbp_threshold"]} |
+{n_splits_row}| SBP threshold | {lineage["elevated_sbp_threshold"]} |
 
 ## Cohort flow
 
@@ -95,10 +130,9 @@ def to_markdown(payload: dict[str, Any]) -> str:
 | dropped (no outcome SBP) | {flow["dropped_no_outcome_sbp"]} |
 | dropped (no prior encounter) | {flow["dropped_no_prior"]} |
 | forward examples | {flow["n_examples"]} |
-| train examples (subjects) | {split["n_train"]} ({split["train_subjects"]}) |
-| test examples (subjects) | {split["n_test"]} ({split["test_subjects"]}) |
+{cohort_split}
 
-## Missingness
+{fold_section}## Missingness
 
 {chr(10).join(missing_lines)}
 

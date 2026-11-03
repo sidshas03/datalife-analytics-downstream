@@ -18,6 +18,13 @@ class LeakageError(Exception):
         super().__init__("; ".join(self.issues))
 
 
+# Folds support aggregate research evaluation only. They are never a clinical tool.
+KFOLD_RESEARCH_ONLY = (
+    "Subject-stratified folds are for aggregate research evaluation "
+    "and are never for clinical decision-making."
+)
+
+
 def subject_split(
     examples: Sequence[ForwardExample],
     *,
@@ -47,6 +54,83 @@ def subject_split(
     assert_no_time_leakage(train)
     assert_no_time_leakage(test)
     return train, test
+
+
+def _require_n_splits(n_splits: int) -> None:
+    if isinstance(n_splits, bool) or not isinstance(n_splits, int) or n_splits < 2:
+        raise ValueError("n_splits must be an integer >= 2")
+
+
+def _subject_class(rows: Sequence[ForwardExample]) -> int:
+    """Majority outcome for a subject. Ties resolve to the smaller label."""
+    counts: dict[int, int] = {}
+    for row in rows:
+        label = int(row.outcome)
+        counts[label] = counts.get(label, 0) + 1
+    return max(counts, key=lambda label: (counts[label], -label))
+
+
+def subject_stratified_kfold(
+    examples: Sequence[ForwardExample],
+    *,
+    n_splits: int,
+    seed: int,
+) -> list[tuple[list[ForwardExample], list[ForwardExample]]]:
+    """Seeded subject-stratified K-fold.
+
+    Every ``subject_key`` is assigned to exactly one validation fold. Fold ``i``
+    is index ``i`` in the returned list, and rows keep their input order.
+    Subjects are stratified by outcome so each class is spread across folds
+    (counts differ by at most one). The same seed reproduces the same folds.
+
+    Fails closed on an empty cohort, fewer subjects than ``n_splits``, or a
+    class with fewer subjects than ``n_splits``. Each train/validation pair is
+    checked for subject leakage and time leakage.
+
+    This is an aggregate research evaluation on synthetic data. It is never
+    for clinical decision-making.
+    """
+    _require_n_splits(n_splits)
+    if not examples:
+        raise ValueError("cohort is empty")
+
+    by_subject: dict[str, list[ForwardExample]] = {}
+    for example in examples:
+        by_subject.setdefault(example.subject_key, []).append(example)
+
+    by_class: dict[int, list[str]] = {}
+    for subject_key, rows in by_subject.items():
+        by_class.setdefault(_subject_class(rows), []).append(subject_key)
+
+    n_subjects = len(by_subject)
+    if n_subjects < n_splits:
+        raise ValueError(f"cohort is undersized: {n_subjects} subject(s) for n_splits={n_splits}")
+    for label in sorted(by_class):
+        class_size = len(by_class[label])
+        if class_size < n_splits:
+            raise ValueError(
+                f"cohort is undersized: class {label} has {class_size} subject(s), "
+                f"fewer than n_splits={n_splits}"
+            )
+
+    rng = random.Random(seed)
+    fold_of: dict[str, int] = {}
+    for label in sorted(by_class):
+        subjects = sorted(by_class[label])
+        rng.shuffle(subjects)
+        for index, subject_key in enumerate(subjects):
+            fold_of[subject_key] = index % n_splits
+
+    pairs: list[tuple[list[ForwardExample], list[ForwardExample]]] = []
+    for fold_index in range(n_splits):
+        train = [ex for ex in examples if fold_of[ex.subject_key] != fold_index]
+        validation = [ex for ex in examples if fold_of[ex.subject_key] == fold_index]
+        assert_no_subject_leakage(train, validation)
+        assert_no_time_leakage(train)
+        assert_no_time_leakage(validation)
+        assert_no_cross_split_time_leakage(train, validation)
+        pairs.append((train, validation))
+    return pairs
 
 
 def assert_no_subject_leakage(

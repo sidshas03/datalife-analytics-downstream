@@ -23,9 +23,10 @@ def lineage(
     n_subjects: int | None,
     input_path: str | None,
     contract_version: str | None = None,
+    n_splits: int | None = None,
 ) -> dict[str, Any]:
     contract = load_contract(contract_version) if contract_version else load_contract()
-    return {
+    recorded = {
         "study_id": STUDY_ID,
         "study_question": STUDY_QUESTION,
         "non_use": NON_USE,
@@ -43,3 +44,6 @@ def lineage(
         "numpy": np.__version__,
         "pandas": pd.__version__,
     }
+    if n_splits is not None:
+        recorded["n_splits"] = n_splits
+    return recorded

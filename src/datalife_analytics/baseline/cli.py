@@ -47,6 +47,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--not-resulted-rate", type=float, default=0.03)
     parser.add_argument("--split-seed", type=int, default=7)
     parser.add_argument("--train-fraction", type=float, default=0.7)
+    parser.add_argument(
+        "--k-folds",
+        type=int,
+        default=None,
+        help=(
+            "Subject-stratified K-fold count for aggregate research evaluation. "
+            "Omit to keep the default two-way subject split. "
+            "Folds are never for clinical decision-making."
+        ),
+    )
     parser.add_argument("--out", type=Path, required=True)
     return parser
 
@@ -80,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
             generator_seed=generator_seed,
             n_subjects=n_subjects,
             input_path=input_path,
+            n_splits=args.k_folds,
         )
     except (ValueError, ContractError, LeakageError, OSError, KeyError) as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -87,9 +98,13 @@ def main(argv: list[str] | None = None) -> int:
 
     json_path, md_path = write_reports(result.payload, args.out)
     split = result.payload["split"]
+    if split.get("mode") == "subject_stratified_kfold":
+        summary = f"k-folds={split['n_splits']} examples={split['n_examples']}"
+    else:
+        summary = f"train={split['n_train']} test={split['n_test']}"
     print(
         f"wrote {json_path} and {md_path} "
-        f"(train={split['n_train']} test={split['n_test']} "
+        f"({summary} "
         f"contract={result.payload['lineage']['contract_version']})"
     )
     return 0
